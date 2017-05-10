@@ -1,0 +1,498 @@
+#!/usr/bin/env python
+from psychopy import *
+import numpy
+import random
+import scipy
+import matplotlib as mplot
+import matplotlib.mlab as mlab
+import matplotlib.pyplot as pyplot
+import os
+num_observers = 3
+# Subj 1 AB, subj 2 AB, subj 3 AB, etc.
+resp_keys = numpy.array( ['a','s', 'v','b', 'k', 'l'] )
+
+def read_single(filename, numrows=26, numcols=26):
+	result = numpy.zeros ( (numcols, numrows ))
+	file = open(filename, 'rt')
+	numread=0
+	while file:
+		line = file.readline()
+		if len(line) == 0:
+			break
+		line_fields = line.strip().split(',')
+		result[numread] = line_fields
+		numread += 1
+	return result
+
+calib_steps = read_single('calib1k.txt',1,25 )
+calib_vals = read_single('calib1v.txt',1,25 )
+
+def interp( steps, vals, x):
+	try:
+		idx = numpy.where( steps >= x  )[0][0] - 1
+		y = vals[idx] + (x-steps[idx]) * ((vals[idx+1] - vals[idx]) / (steps[idx+1]-steps[idx]) )
+	except:
+		if x>100:
+			y = vals[len(vals)]
+		else:
+			y = vals[0]
+	return y
+
+def myshuf(lis):
+	for i in range(len(lis)):
+		idx = int( scipy.rand() * (len(lis)-(i+1)) )
+		t = lis[i+idx]
+		lis[i+idx] = lis[i]
+		lis[i] = t
+	return lis
+
+num_stims = len(stimvals)
+max_trials = num_stims * stimreps
+
+# Ascend/descend denote their own
+if any( (ascend, descend) ):
+	trial_seq = stimvals
+else:
+	trial_seq = myshuf( numpy.tile( stimvals, (1,stimreps) )[0] )
+
+results = numpy.zeros( (num_observers, max_trials) )
+
+if condition==1:
+	trial_inA = numpy.zeros(len(trial_seq)) == 0
+else:
+	trial_inA = [random.random() < 0.5 for i in numpy.arange(len(trial_seq))]
+
+# TODO: need these?
+mess_on = True
+quit = 0
+
+#INITIALISE SOME STIMULI
+myWin = visual.Window((800,600), fullscr=True, color=numpy.tile(backcon,3) )
+
+fixSpot = visual.PatchStim(myWin,tex="none", mask="gauss", pos=(0.1,0.00), size=(0.05,0.05) )
+fixSpot.setColor(dmesgColor, 'rgb255')
+fixSpot.setPos( (-0.99, 0) )
+
+#backPed = visual.PatchStim(myWin,tex="none", mask="gauss", pos=(0.0,0.0), size=pedsize, color=pedconf  )
+message = visual.PatchStim(myWin,tex="none", mask="circle", pos=(0.0,0.0), size=pedsize, color=pedconf  )
+
+circle = visual.PatchStim(myWin,tex="none", mask="circle", units='pix', pos=(0.0,0.0), size=pedsize, color=pedconf  )
+
+noise = visual.PatchStim( myWin, tex="none", pos=(0.010, -0.01), size=(0.1,0.1) )
+grating = visual.PatchStim(myWin,pos=(0.0,0.0),
+                           tex="sin",#mask="gauss",
+                           #rgb=[1.0,1.0,1.0],
+                           size=(2.0,2.0), sf=10.0)
+
+# message = visual.TextStim(myWin,pos=targpos,
+		#alignHoriz='left',height=targheight, ori=00, text='abc', font='Sloan',
+		#color=(0.59,0.59,0.59))
+
+# Start doing visual stuff
+message2 = visual.TextStim(myWin,pos=(-0.85,0.25), wrapWidth=1.85,
+		alignHoriz='left',height=0.10, ori=00, text='C', 
+		color=(-0.50,-0.50,-0.50))
+
+if condition<2:
+	cond_text = ["", "Yes/No (Is there a target?)", "", "2AFC (Which interval has target?)"]
+	message2.setText("%s\n\n%s\n\n%s" %
+		(cond_text[condition],
+		"Subject 1: 'a' = Yes/First interval, 's'=No/Second interval\nSubject 2: 'v' = Yes/First interval, 'b'=No/Second interval\nSubject 3: 'k' = Yes/First interval, 'l'=No/Second interval",
+		"Experiment starts as soon as any key is pressed.\nGood luck!") )
+else:
+	message2.setText("Press any key to begin.")
+
+message2.draw()
+myWin.flip()
+event.waitKeys()
+
+# r, left, down, up
+line1 = visual.ShapeStim( myWin, vertices=((0.35,0), (0.3,0)), closeShape=False, lineRGB=clrFixCross)
+line2 = visual.ShapeStim( myWin, vertices=((-0.35,0), (-0.3,0)), closeShape=False, lineRGB=clrFixCross)
+line3 = visual.ShapeStim( myWin, vertices=((0,0.35), (0,0.4)), closeShape=False, lineRGB=clrFixCross)
+line4 = visual.ShapeStim( myWin, vertices=((0,-0.35), (0,-0.4)), closeShape=False, lineRGB=clrFixCross)
+
+myMouse = event.Mouse(win=myWin) # TODO: rmv
+info_csf = {'spatial_freq':10,
+	'contrast':0,
+	'distance_cm':56,
+	'screen_width_cm':19.3675,
+	'coarse_inc':0.1,
+	'fine_inc':0.001}
+
+info_tmtf = {'freq':9,
+	'screen_refresh':120,
+	'coarse_inc':0.1,
+	'fine_inc':0.001,
+	'mean_luminance':0.25}
+
+tmtf_mod = 0.25
+tmtf_phase = 0
+tmtf_phase_inc = 0.25
+
+tmtf_mode = False
+csf_mode = False
+
+def adjust(up, fine):
+	global tmtf_mod
+	if tmtf_mode:
+		if up:
+			mult = 1.0
+		else:
+			mult = -1.0
+
+		if fine:
+			tmtf_mod += mult*info_tmtf['fine_inc']
+		else:
+			tmtf_mod += mult*info_tmtf['coarse_inc']
+
+	else: # csv mode
+		if up:
+			mult = 1.0
+		else:
+			mult = -1.0
+
+		if fine:
+			grating.setContrast(mult*info_csf['fine_inc'],'+')
+		else:
+			grating.setContrast(mult*info_csf['coarse_inc'],'+')
+
+
+def setTrialText( mess, which):
+    if which:
+	    #mess.setText('C   O')
+	    mess.setText('C')
+    else:
+	    mess.setText(' ')
+	    #mess.setText('O   C')
+
+trial = 0
+pedadj = 80
+doDisplay = False
+trial_seq[trial]=15 #sets original size of dot
+while trial < max_trials: #continue until keypress
+
+    #myWin.setColor( 64, 'rgb255')
+
+    if pretrial_fix:
+	if fixation_big_cross:
+		line1.draw()
+		line2.draw()
+		line3.draw()
+		line4.draw()
+	else:
+    		noise.setSize( (0.01, 0.01) )
+    		noise.setTex( fix_contrast - numpy.zeros( (4,4) ) )
+    		noise.draw()
+    		myWin.flip()
+    		noise.setSize( (0.1, 0.1) )
+
+	if (fix_time > 0):	
+		myWin.flip()
+    		core.wait(fix_time)
+
+	if condition in [2,5,6]:
+    	    
+		if pre_noise_time > 0:
+			#fixSpot.setColor(dmesgColor, 'rgb255')
+			#fixSpot.setPos( (-0.5, 0) )
+			fixSpot.draw()
+			myWin.flip()
+			core.wait(pre_noise_time)
+		
+		#fixSpot.setColor(dmesgColor, 'rgb255')
+		#fixSpot.setPos( (-0.5, 0) )
+		fixSpot.draw()
+
+		circle.setColor(float(trial_seq[trial]), 'rgb255' )
+		#circle.setSize(int(pedadj) , units='pix')
+		if condition==2:
+			circle.setSize( (int(pedadj),int(pedadj) ) )
+		elif condition in [5,6]:
+			circle.setSize( (17,17) )
+
+		circle.draw()
+
+		#if fixation_big_cross:
+			#line1.draw()
+			#line2.draw()
+			#line3.draw()
+			#line4.draw()
+
+		myWin.flip()
+
+		if condition==5:
+			core.wait(float(pedadj)/1000.0)
+		elif condition==2:
+			core.wait(trial_time)
+		elif condition==6:
+			core.wait(trial_time)
+
+			fixSpot.draw()
+			#if pretrial_fix:
+				#if fixation_big_cross:
+			line1.draw()
+			line2.draw()
+			line3.draw()
+			line4.draw()
+			myWin.flip()
+
+			# Blank (with fix's) briefly
+			core.wait(float(pedadj)/1000.0)
+
+			# Flash on again
+			circle.draw()
+			fixSpot.draw()
+			#if pretrial_fix:
+				#if fixation_big_cross:
+			line1.draw()
+			line2.draw()
+			line3.draw()
+			line4.draw()
+			myWin.flip()
+			core.wait(trial_time)
+
+		if noise_time > 0:
+			#fixSpot.setColor(dmesgColor, 'rgb255')
+			#fixSpot.setPos( (-0.5, 0) )
+			fixSpot.draw()
+			myWin.flip()
+			core.wait(noise_time)
+
+		#blank screen
+		#fixSpot.setColor(dmesgColor, 'rgb255')
+		#fixSpot.setPos( (-0.5, 0) )
+		fixSpot.draw()
+
+		if pretrial_fix:
+			if fixation_big_cross:
+				line1.draw()
+				line2.draw()
+				line3.draw()
+				line4.draw()
+
+		myWin.flip()
+
+    did_adj = False
+    resps = numpy.zeros( num_observers ) == 1.0
+    while all( (len(mlab.find(resps)) < num_observers, did_adj==False)):
+        for key in event.getKeys():
+
+         if key in ['up']:
+             trial_seq[trial] += targInc
+             did_adj=True
+             #message.draw()
+             #noise.setSize( (0.5, 0.5) )
+             #noise.setTex( 1.0 - numpy.zeros( (4,4) ) )
+             #noise.setColor( int(pedadj) , 'rgb255')
+             #noise.draw()
+
+             #message.setText(targ_text)
+             #message.setColor(int(trial_seq[trial]) , 'rgb255')
+             #message.setText('.')
+             #message.draw()
+             #message.setHeight(0.8)
+             #myWin.flip()
+
+         if key in ['down']:
+           trial_seq[trial] -= targInc
+           did_adj=True
+           #message.draw()
+           #fixSpot.setColor(int(trial_seq[trial]) , 'rgb255')
+           #fixSpot.draw()
+           #noise.setSize( (0.5, 0.5) )
+           #noise.setTex( 1.0 - numpy.zeros( (4,4) ) )
+           #noise.setColor( int(pedadj) , 'rgb255')
+           #noise.draw()
+
+           #message.setText(targ_text)
+           #message.setColor(int(trial_seq[trial]) , 'rgb255')
+           #message.setText('.')
+           #message.setHeight(0.8)
+           #message.draw()
+           #myWin.flip()
+
+         if key in ['end']:
+		 did_adj=True
+		 
+         if key in ['l']:
+		backPed.setColor( (250,100,100)  )
+		backPed.setSize( (1.5,1.5) )
+		backPed.draw()
+		myWin.flip()
+		event.waitKeys()
+		backPed.setSize( pedsize )
+		 
+         if key in ['left']:
+             pedadj -= 1
+
+             if not(condition==6):
+    	     	doDisplay = True
+			 else:
+				did_adj = True
+
+         if key in ['right']:
+             pedadj += 1
+             
+             if not(condition==6):
+	         	doDisplay=True
+			 else:
+				did_adj=True
+             #noise.setSize( (0.5, 0.5) )
+             #noise.setTex( 1.0 - numpy.zeros( (4,4) ) )
+             #noise.setColor( int(trial_seq[trial]) , 'rgb255')
+             #noise.draw()
+
+             #message.setText(targ_text)
+             #message.setColor(int(trial_seq[trial]) , 'rgb255')
+             #message.draw()
+             #myWin.flip()
+
+         if key in ['d', '\n', 'cr']:
+		 doDisplay = doDisplay==False
+
+	# turn off display immediately if they do task
+         if did_adj:
+		 doDisplay = False
+
+         if doDisplay:
+              message2.setPos( (-0.65, 0.6) )
+              message2.setColor( dmesgColor, 'rgb255' )
+	      val = trial_seq[trial]
+	      msg = ""
+	      if condition==2:
+	      	msg += 'A=%i pix^2 (diam=%d pixels) \n' % ( int(pedadj/2)**2, int(pedadj) )
+              	msg += 'L=%f cd/m^2 (raw=%d) \n' % (interp( calib_steps, calib_vals, val), val  )
+              	#msg += 'ped=%i (%f cd/m^2) \n' % (int(pedadj), interp( calib_steps, calib_vals, pedadj) )
+	      elif condition==5:
+			msg += 't=%i ms\n' % ( int(pedadj) )
+			msg += 'L=%f cd/m^2 (raw=%d) \n' % (interp( calib_steps, calib_vals, val), val  )
+	      elif condition==6:
+			msg += 't=%i ms (betw. flashes)\n' % ( int(pedadj) )
+			msg += 'L=%f cd/m^2 (raw=%d) \n' % (interp( calib_steps, calib_vals, val), val  )
+	      elif True:
+	      	msg = 'target=%i (%f cd/m^2) \n' % (int(val), interp( calib_steps, calib_vals, val) ) 
+              	msg += 'ped=%i (%f cd/m^2) \n' % (int(pedadj), interp( calib_steps, calib_vals, pedadj) )
+              	msg += 'deltaL=%i (%f cd/m^2) \n' % (int(val-pedadj), interp( calib_steps, calib_vals, val)-interp(calib_steps, calib_vals, pedadj) )
+              	msg += 'deltaL/L=%f cd/m^2 \n' % ( (interp( calib_steps, calib_vals, val)-interp(calib_steps, calib_vals, pedadj) )/interp( calib_steps, calib_vals, pedadj ) )
+
+	      message2.setText(msg)
+              #message.setFont('Times')
+              message2.draw()
+
+				# TODO: Maybe want to draw something per-condition?
+              #noise.setSize( (0.5, 0.5) )
+              #noise.setTex( 1.0 - numpy.zeros( (4,4) ) )
+              #noise.setColor( 40 , 'rgb255') #set to some gray to find foveas
+              #noise.draw()
+
+              myWin.flip()
+              #event.waitKeys()
+              #message.setFont('Sloan')
+
+         if key in ['escape','q']:
+              myWin.close()
+              trial = max_trials
+              resps = numpy.zeros( num_observers ) == 0.0
+
+              break
+
+         if key in resp_keys: #['a', 's']: #resp_keys2:
+              #print 'hi'
+              #obs = 
+              #resps[0] = True
+              #resps[1] = True
+              #esps[2] = True
+              #esults[0][0]= 1
+              #idx = fi
+              (obs,idx) = divmod( mlab.find( resp_keys == key )[0], 2) #2=2afc
+              resps[obs] = True
+              results[obs, trial] = idx
+              #resp = mod( find( resp_
+
+    if ascend:
+        if any( results[:,trial] ):
+			trial += 0	
+        else:
+            break
+
+    if descend:
+        if all( results[:,trial] ):
+            break
+
+    if adjust==0:
+    	trial += 1
+
+# Post process: collate and display
+for which_trial in numpy.arange(max_trials):
+	trial_correct = [ trial_inA != results[subj, :] for subj in numpy.arange(num_observers) ]
+
+#for which_stim in arange(num_stims):
+	#stimidxs = mlab.find( trial_seq==stimvals[which_stim] )
+	#for subj in arange(num_observers):
+		#stimcorrect = results[subj, stimidxs] == 
+
+tots = [ [len( mlab.find((trial_seq == stimvals[trial]) & trial_correct[subj]) )
+	for trial in numpy.arange(num_stims)] for subj in numpy.arange(num_observers) ]
+
+if output_graph:
+	pyplot.figure()
+	for i in numpy.arange(num_observers):
+		pyplot.subplot(3,1,i+1)
+		pyplot.plot( numpy.array(tots[i]) / float(stimreps), 'o-' )
+		pyplot.xticks( numpy.arange(num_stims), ['%i' % stimvals[j] for j in numpy.arange(num_stims)] )
+		#pyplot.ylim( 0-0.1,1.0+0.1 )
+		#axis('tight')
+		#pyplot.title( '%i' % i)
+		pyplot.grid()
+		#pyplot.legend( ['%i' % i for i in numpy.arange(num_observers)] )
+
+	pyplot.show()
+
+elif output_hits:
+	while len( event.getKeys() ) > 0:
+		i = 0	
+
+	corr_rej = [ len( mlab.find((trial_seq == stimvals[0]) & (trial_correct[subj] != True)) ) for subj in numpy.arange(num_observers) ]
+	tot_catch = len( mlab.find(trial_seq == stimvals[0]))
+	hits = [ len( mlab.find((trial_seq != stimvals[0]) & trial_correct[subj]) ) for subj in numpy.arange(num_observers) ]
+	tot_targ = len( mlab.find(trial_seq != stimvals[0]))
+	
+	hitmsg = 'corr rej: %d, %d, %d (of %d)\nhits: %d, %d, %d (of %d)' % ( corr_rej[0], corr_rej[1], corr_rej[2], tot_catch, hits[0], hits[1], hits[2], tot_targ)
+
+	message2.setText(hitmsg)
+	message2.draw()
+	myWin.flip()
+	event.waitKeys()
+
+elif ascend:
+	while len( event.getKeys() ) > 0:
+		i = 0	
+
+	limits = "Limit: %d, %d, %d" % (trial_seq[max(mlab.find(results[0]))],
+		trial_seq[max(mlab.find(results[1]))],trial_seq[max(mlab.find(results[2]))])
+	message2.setText(limits)
+	message2.draw()
+	myWin.flip()
+	event.waitKeys()
+
+elif descend:
+	while len( event.getKeys() ) > 0:
+		i = 0	
+
+	limits = "Limit: %d, %d, %d" % (trial_seq[min(mlab.find(results[0]))],
+		trial_seq[min(mlab.find(results[1]))],trial_seq[min(mlab.find(results[2]))])
+	message2.setText(limits)
+	message2.draw()
+	myWin.flip()
+	event.waitKeys()
+
+#done = False
+#while not done:
+	#if 'q' in event.getKeys():
+		#done = True
+	#if 'escape' in event.getKeys():
+		#done = True
+
+myWin.close()
+
